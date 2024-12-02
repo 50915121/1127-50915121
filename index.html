@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Firebase 筆記本系統</title>
+  
+  <!-- Bootstrap CSS -->
+  <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap JS -->
+  <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.3/dist/umd/popper.min.js"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+
+  <style>
+    /* 顯示頭像的區域，定位在右上角 */
+    #user-avatar {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      overflow: hidden;
+      background-color: #f0f0f0;
+      cursor: pointer; /* 顯示為可點擊 */
+    }
+    #user-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    /* Modal Styles */
+    .modal-content {
+      padding: 20px;
+    }
+
+    .modal-header {
+      border-bottom: none;
+    }
+
+    /* 筆記顯示區域 */
+    #note-list {
+      margin-top: 30px;
+    }
+    .note-item {
+      border: 1px solid #ddd;
+      margin-bottom: 10px;
+      padding: 10px;
+      border-radius: 5px;
+    }
+  </style>
+
+  <script type="module">
+    // 匯入 Firebase 函數
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+    import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-analytics.js";
+    import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+    import { getDatabase, ref, set, update, onValue, remove, push } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-database.js";
+
+    // Firebase 配置
+    const firebaseConfig = {
+      apiKey: "AIzaSyCfGN3wZpT7MNlNVw-LdkCJsI3RCyJmWw4",
+      authDomain: "project-4785156063037454245.firebaseapp.com",
+      projectId: "project-4785156063037454245",
+      storageBucket: "project-4785156063037454245.firebasestorage.app",
+      messagingSenderId: "294625896024",
+      appId: "1:294625896024:web:ca5fb1b340a5083cf78c2d",
+      measurementId: "G-Q4K05B20DH",
+      databaseURL: "https://project-4785156063037454245-default-rtdb.asia-southeast1.firebasedatabase.app/"
+    };
+
+    // 初始化 Firebase
+    const app = initializeApp(firebaseConfig);
+    const analytics = getAnalytics(app);
+    const auth = getAuth(app);
+    const database = getDatabase(app);
+
+    let currentUser = null;
+
+    // Google 註冊功能
+    async function googleRegister() {
+      const provider = new GoogleAuthProvider();
+      try {
+        const result = await signInWithPopup(auth, provider);
+        const user = result.user;
+        const uid = user.uid;
+        const { displayName, email, photoURL } = user;
+
+        // 檢查使用者是否已存在
+        const userRef = ref(database, 'users/' + uid);
+        onValue(userRef, (snapshot) => {
+          if (!snapshot.exists()) {
+            // 存儲新使用者資訊，並將註冊時間設置為當前時間
+            const lastLoginTime = new Date().toISOString();  // 註冊時的時間
+            set(userRef, {
+              displayName,
+              email,
+              photoURL,
+              lastLoginTime  // 記錄註冊時的時間
+            });
+            alert("註冊成功！");
+          }
+        });
+
+        // 註冊成功後隱藏按鈕
+        document.getElementById("register-button").style.display = "none";
+        document.getElementById("login-button").style.display = "none";
+
+        // 顯示使用者頭像
+        displayUserAvatar(photoURL);
+
+        // 記錄當前使用者
+        currentUser = user;
+
+        // 顯示筆記
+        loadNotes();
+
+        // 顯示新增筆記按鈕
+        document.getElementById("add-note-button").style.display = "inline-block";
+        
+      } catch (error) {
+        console.error("註冊失敗:", error);
+      }
+    }
+
+    // 顯示使用者頭像在頁面右上角
+    function displayUserAvatar(photoURL) {
+      const avatarContainer = document.getElementById("user-avatar");
+      const img = document.createElement("img");
+      img.src = photoURL;
+      avatarContainer.innerHTML = ""; // 清空之前的圖片
+      avatarContainer.appendChild(img);
+    }
+
+    // 顯示使用者資訊並顯示 Modal
+function displayUserInfo(userInfo) {
+  const { displayName, email, photoURL } = userInfo;
+
+  document.getElementById("user-info").innerHTML = `\
+    <p>姓名: ${displayName}</p>\
+    <p>Email: ${email}</p>\
+    <img src="${photoURL}" alt="Profile Picture" width="100"/>\    
+    <p></p>\
+    <button id="logout-button" class="btn btn-danger mt-3">登出</button>
+  `;
+
+  // 顯示 Modal
+  const modal = new bootstrap.Modal(document.getElementById("user-modal"));
+  modal.show();
+
+  // 為登出按鈕綁定點擊事件
+  document.getElementById("logout-button").addEventListener("click", logout);
+}
+
+
+    // 登出功能
+    function logout() {
+      signOut(auth).then(() => {
+        // 登出後，顯示登入和註冊按鈕
+        document.getElementById("register-button").style.display = "inline-block";
+        document.getElementById("login-button").style.display = "inline-block";
+
+        // 隱藏新增筆記按鈕
+        document.getElementById("add-note-button").style.display = "none";
+
+        // 清除頭像
+        document.getElementById("user-avatar").innerHTML = "";
+
+        // 清除筆記
+        document.getElementById("note-list").innerHTML = "";
+
+        currentUser = null;
+        
+        document.getElementById("user-modal").classList.remove("show");
+        document.body.classList.remove("modal-open");
+        const backdrop = document.querySelector(".modal-backdrop");
+        if (backdrop) backdrop.remove();
+      }).catch((error) => {
+        console.error("登出失敗:", error);
+      });
+    }
+
+    // 顯示筆記列表
+    function loadNotes() {
+      const notesRef = ref(database, 'notes/' + currentUser.uid);
+      onValue(notesRef, (snapshot) => {
+        const notesContainer = document.getElementById("note-list");
+        notesContainer.innerHTML = ""; // 清空現有筆記
+      
+        snapshot.forEach((noteSnapshot) => {
+          const note = noteSnapshot.val();
+          const noteId = noteSnapshot.key;
+        
+          const noteElement = document.createElement("div");
+          noteElement.classList.add("note-item");
+          noteElement.innerHTML = `\
+            <h5>${note.title}</h5>\
+            <p>${note.content}</p>\
+            <button class="btn btn-warning btn-sm edit-note-btn" data-note-id="${noteId}">編輯</button>\
+            <button class="btn btn-danger btn-sm delete-note-btn" data-note-id="${noteId}">刪除</button>\
+          `;
+          notesContainer.appendChild(noteElement);
+        });
+      
+        // 綁定編輯和刪除按鈕的事件
+        document.querySelectorAll('.edit-note-btn').forEach((button) => {
+          button.addEventListener('click', (e) => {
+            const noteId = e.target.dataset.noteId;
+            editNote(noteId);
+          });
+        });
+      
+        document.querySelectorAll('.delete-note-btn').forEach((button) => {
+          button.addEventListener('click', (e) => {
+            const noteId = e.target.dataset.noteId;
+            deleteNote(noteId);
+          });
+        });
+      });
+    }
+
+
+    // 新增筆記
+    function addNote() {
+      const title = prompt("請輸入筆記標題:");
+      const content = prompt("請輸入筆記內容:");
+
+      if (title && content) {
+        const newNoteRef = push(ref(database, 'notes/' + currentUser.uid));
+        set(newNoteRef, {
+          title,
+          content
+        }).then(() => {
+          loadNotes(); // 更新筆記列表
+        }).catch((error) => {
+          console.error("新增筆記失敗:", error);
+        });
+      }
+    }
+
+    // 編輯筆記
+    function editNote(noteId) {
+      const noteRef = ref(database, 'notes/' + currentUser.uid + '/' + noteId);
+      onValue(noteRef, (snapshot) => {
+        const note = snapshot.val();
+        if (note) {
+          const newTitle = prompt("修改標題:", note.title);
+          const newContent = prompt("修改內容:", note.content);
+        
+          if (newTitle !== null && newContent !== null) {
+            update(noteRef, {
+              title: newTitle,
+              content: newContent
+            }).then(() => {
+              console.log("筆記更新成功!");
+              loadNotes(); // 更新筆記列表
+            }).catch((error) => {
+              console.error("修改筆記失敗:", error);
+            });
+          }
+        } else {
+          console.error("筆記不存在!");
+        }
+      });
+    }
+
+    // 刪除筆記
+    function deleteNote(noteId) {
+      const noteRef = ref(database, 'notes/' + currentUser.uid + '/' + noteId);
+      remove(noteRef).then(() => {
+        console.log("筆記已刪除");
+        loadNotes(); // 更新筆記列表
+      }).catch((error) => {
+        console.error("刪除筆記失敗:", error);
+      });
+    }
+
+
+    // 當用戶狀態改變時，隱藏按鈕
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        document.getElementById("register-button").style.display = "none";
+        document.getElementById("login-button").style.display = "none";
+        displayUserAvatar(user.photoURL);
+
+        // 記錄當前用戶
+        currentUser = user;
+
+        // 顯示筆記
+        loadNotes();
+
+        // 顯示新增筆記按鈕
+        document.getElementById("add-note-button").style.display = "inline-block";
+      } else {
+        // 使用者未登入，隱藏新增筆記按鈕
+        document.getElementById("add-note-button").style.display = "none";
+      }
+    });
+
+    // 綁定按鈕點擊事件
+    document.addEventListener("DOMContentLoaded", () => {
+      document.getElementById("register-button").addEventListener("click", googleRegister);
+      document.getElementById("login-button").addEventListener("click", googleRegister);
+      
+      // 點擊頭像顯示使用者資訊
+      document.getElementById("user-avatar").addEventListener("click", () => {
+        const user = auth.currentUser;
+        if (user) {
+          displayUserInfo({
+            displayName: user.displayName,
+            email: user.email,
+            photoURL: user.photoURL
+          });
+        }
+      });
+
+      // 綁定新增筆記按鈕
+      document.getElementById("add-note-button").addEventListener("click", addNote);
+    });
+  </script>
+</head>
+<body>
+  <h1 class="text-center my-4">筆記本</h1>
+
+  <div class="text-center">
+    <button id="register-button" class="btn btn-primary">使用 Google 註冊</button>
+    <button id="login-button" class="btn btn-secondary">使用 Google 登入</button>
+  </div>
+
+  <!-- 顯示使用者頭像的區域 -->
+  <div id="user-avatar"></div>
+
+  <!-- 使用者資訊 Modal -->
+  <div class="modal fade" id="user-modal" tabindex="-1" role="dialog" aria-labelledby="userModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="userModalLabel">使用者資訊</h5>
+          <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+            <span aria-hidden="true">&times;</span>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div id="user-info"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 筆記操作區 -->
+  <div class="text-center mt-3">
+    <button id="add-note-button" class="btn btn-success" style="display: none;">新增筆記</button>
+  </div>
+
+  <!-- 筆記列表區域 -->
+  <div id="note-list"></div>
+
+</body>
+</html>
